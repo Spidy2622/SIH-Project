@@ -1,33 +1,50 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Trophy, RotateCcw, ArrowRight, Star } from 'lucide-react';
-import { GameState, LeaderboardEntry } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Trophy, RotateCcw, Star } from 'lucide-react';
+import { GameState, LeaderboardEntry, User } from '../types';
+import { apiService } from '../services/api';
 
 interface ResultsPageProps {
   gameState: GameState;
   onNavigate: (page: string) => void;
+  currentUser?: User | null;
 }
 
-export const ResultsPage: React.FC<ResultsPageProps> = ({ gameState, onNavigate }) => {
+export const ResultsPage: React.FC<ResultsPageProps> = ({ gameState, onNavigate, currentUser }) => {
   const [playerName, setPlayerName] = useState('');
   const [savedToLeaderboard, setSavedToLeaderboard] = useState(false);
 
-  const saveToLeaderboard = () => {
+  useEffect(() => {
+    if (currentUser) {
+      setPlayerName(currentUser.name);
+    }
+  }, [currentUser]);
+
+  const saveToLeaderboard = async () => {
     if (!playerName.trim() || savedToLeaderboard) return;
 
-    const entry: LeaderboardEntry = {
-      name: playerName.trim(),
-      score: gameState.score,
-      level: gameState.level,
-      date: new Date().toISOString()
-    };
-
-    const existingEntries = JSON.parse(localStorage.getItem('ecoSortLeaderboard') || '[]');
-    const updatedEntries = [...existingEntries, entry]
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
-
-    localStorage.setItem('ecoSortLeaderboard', JSON.stringify(updatedEntries));
-    setSavedToLeaderboard(true);
+    try {
+      if (currentUser) {
+        await apiService.submitScore({
+          userId: currentUser.id,
+          score: gameState.score,
+          gameType: 'waste-sorting'
+        });
+      }
+      setSavedToLeaderboard(true);
+    } catch (e) {
+      // fallback to local if API fails
+      const entry: LeaderboardEntry = {
+        name: playerName.trim(),
+        score: gameState.score,
+        level: gameState.level,
+        date: new Date().toISOString(),
+        userId: currentUser?.id
+      };
+      const existingEntries = JSON.parse(localStorage.getItem('ecoSortLeaderboard') || '[]');
+      const updatedEntries = [...existingEntries, entry].sort((a, b) => b.score - a.score).slice(0, 50);
+      localStorage.setItem('ecoSortLeaderboard', JSON.stringify(updatedEntries));
+      setSavedToLeaderboard(true);
+    }
   };
 
   const getPerformanceMessage = () => {

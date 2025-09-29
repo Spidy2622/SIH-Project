@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Heart, Star, Zap } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowLeft, Heart, Star, Zap, Pause, Play } from 'lucide-react';
 import { WasteItem } from './WasteItem';
 import { Dustbin } from './Dustbin';
 import { wasteItems } from '../data/wasteItems';
-import { WasteItem as WasteItemType, GameState, Mistake } from '../types';
+import { WasteItem as WasteItemType, GameState, Mistake, User } from '../types';
 
 interface GamePageProps {
   onNavigate: (page: string, gameState?: GameState) => void;
+  currentUser?: User | null;
 }
 
 interface FallingItem {
@@ -23,13 +24,16 @@ export const GamePage: React.FC<GamePageProps> = ({ onNavigate }) => {
     lives: 3,
     mistakes: [],
     isGameOver: false,
-    itemsFallen: 0
+    itemsFallen: 0,
+    isPaused: false
   });
   
   const [fallingItems, setFallingItems] = useState<FallingItem[]>([]);
   const [draggedItem, setDraggedItem] = useState<WasteItemType | null>(null);
   const [showFeedback, setShowFeedback] = useState<{ show: boolean; correct: boolean; item?: WasteItemType; correctBin?: string }>({ show: false, correct: false });
   const [highlightedBin, setHighlightedBin] = useState<string | null>(null);
+  const spawnIntervalRef = useRef<number | null>(null);
+  const moveIntervalRef = useRef<number | null>(null);
 
   const gameSpeed = Math.max(1000 - (gameState.level - 1) * 150, 300);
   const spawnRate = Math.max(2000 - (gameState.level - 1) * 200, 800);
@@ -39,7 +43,7 @@ export const GamePage: React.FC<GamePageProps> = ({ onNavigate }) => {
   };
 
   const spawnItem = useCallback(() => {
-    if (gameState.isGameOver) return;
+    if (gameState.isGameOver || gameState.isPaused) return;
 
     const item = getRandomItem();
     const newItem: FallingItem = {
@@ -50,9 +54,11 @@ export const GamePage: React.FC<GamePageProps> = ({ onNavigate }) => {
     };
 
     setFallingItems(prev => [...prev, newItem]);
-  }, [gameState.isGameOver]);
+  }, [gameState.isGameOver, gameState.isPaused]);
 
   const moveItems = useCallback(() => {
+    if (gameState.isPaused) return;
+    
     setFallingItems(prev => {
       const updated = prev.map(item => ({
         ...item,
@@ -71,17 +77,27 @@ export const GamePage: React.FC<GamePageProps> = ({ onNavigate }) => {
       
       return updated;
     });
-  }, [gameSpeed]);
+  }, [gameSpeed, gameState.isPaused]);
+
+  const togglePause = () => {
+    setGameState(prev => ({ ...prev, isPaused: !prev.isPaused }));
+  };
 
   useEffect(() => {
-    const spawnInterval = setInterval(spawnItem, spawnRate);
-    const moveInterval = setInterval(moveItems, 16);
+    if (gameState.isPaused || gameState.isGameOver) {
+      if (spawnIntervalRef.current) clearInterval(spawnIntervalRef.current);
+      if (moveIntervalRef.current) clearInterval(moveIntervalRef.current);
+      return;
+    }
+
+    spawnIntervalRef.current = window.setInterval(spawnItem, spawnRate);
+    moveIntervalRef.current = window.setInterval(moveItems, 16);
 
     return () => {
-      clearInterval(spawnInterval);
-      clearInterval(moveInterval);
+      if (spawnIntervalRef.current) clearInterval(spawnIntervalRef.current);
+      if (moveIntervalRef.current) clearInterval(moveIntervalRef.current);
     };
-  }, [spawnItem, moveItems, spawnRate]);
+  }, [spawnItem, moveItems, spawnRate, gameState.isPaused, gameState.isGameOver]);
 
   useEffect(() => {
     if (gameState.lives <= 0) {
@@ -145,6 +161,19 @@ export const GamePage: React.FC<GamePageProps> = ({ onNavigate }) => {
     // Item will be handled in drop
   };
 
+  // Add keyboard listener for pause
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      if (e.key === ' ' || e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        togglePause();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, []);
+
   if (gameState.isGameOver) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-red-400 to-pink-500 flex items-center justify-center p-4">
@@ -171,6 +200,25 @@ export const GamePage: React.FC<GamePageProps> = ({ onNavigate }) => {
         </button>
         
         <div className="flex items-center gap-6">
+          <button
+            onClick={togglePause}
+            className={`${
+              gameState.isPaused ? 'bg-green-500 hover:bg-green-600' : 'bg-yellow-500 hover:bg-yellow-600'
+            } text-white px-4 py-2 rounded-xl transition-all flex items-center gap-2`}
+          >
+            {gameState.isPaused ? (
+              <>
+                <Play size={20} />
+                Resume
+              </>
+            ) : (
+              <>
+                <Pause size={20} />
+                Pause
+              </>
+            )}
+          </button>
+
           <div className="flex items-center gap-2">
             <Star className="text-yellow-500" size={24} />
             <span className="font-bold text-xl">{gameState.score}</span>
@@ -187,6 +235,39 @@ export const GamePage: React.FC<GamePageProps> = ({ onNavigate }) => {
           </div>
         </div>
       </div>
+
+      {/* Pause Overlay */}
+      {gameState.isPaused && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-white rounded-3xl shadow-2xl p-8 max-w-md w-full text-center">
+            <div className="text-6xl mb-4">⏸️</div>
+            <h2 className="text-3xl font-bold text-gray-800 mb-4">Game Paused</h2>
+            <p className="text-gray-600 mb-6">Take a break! Your progress is saved.</p>
+            
+            <div className="space-y-4">
+              <button
+                onClick={togglePause}
+                className="w-full bg-gradient-to-r from-green-500 to-green-600 text-white font-semibold py-4 px-6 rounded-2xl hover:from-green-600 hover:to-green-700 transform hover:scale-105 transition-all duration-200 shadow-lg flex items-center justify-center gap-3"
+              >
+                <Play size={24} />
+                Resume Game
+              </button>
+              
+              <button
+                onClick={() => onNavigate('home')}
+                className="w-full bg-gradient-to-r from-gray-500 to-gray-600 text-white font-semibold py-4 px-6 rounded-2xl hover:from-gray-600 hover:to-gray-700 transform hover:scale-105 transition-all duration-200 shadow-lg flex items-center justify-center gap-3"
+              >
+                <ArrowLeft size={24} />
+                Exit to Home
+              </button>
+            </div>
+
+            <div className="mt-6 text-sm text-gray-500">
+              Press <kbd className="px-2 py-1 bg-gray-200 rounded">Space</kbd>, <kbd className="px-2 py-1 bg-gray-200 rounded">P</kbd>, or <kbd className="px-2 py-1 bg-gray-200 rounded">Esc</kbd> to resume
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Game Area */}
       <div className="relative h-full">
